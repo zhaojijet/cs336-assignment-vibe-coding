@@ -1,4 +1,6 @@
 import logging
+import json
+import random
 import torch
 import torch.nn.functional as F
 from typing import Literal, List, Dict, Any, Optional
@@ -75,15 +77,23 @@ def train(
     logging.basicConfig(level=logging.INFO)
     logger.info("Initializing GRPO training...")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+
+    logger.info(f"Using device: {device}")
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
+    tokenizer.padding_side = "left"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        torch_dtype=torch.bfloat16 if device.type != "cpu" else torch.float32,
         device_map=device,
     )
 

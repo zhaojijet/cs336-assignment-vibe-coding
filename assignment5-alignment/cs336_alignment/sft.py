@@ -53,6 +53,7 @@ def get_packed_sft_dataset(
     seq_length: int,
     shuffle: bool = True,
     pack: bool = True,
+    limit: Optional[int] = None,
 ) -> Dataset:
     """
     Create a dataset of tokenized prompt/output pairs from a JSONL or Parquet file.
@@ -82,6 +83,8 @@ def get_packed_sft_dataset(
                     )
                     formatted_solution = format_solution_r1_zero(item["solution"])
                     data.append((formatted_prompt, formatted_solution))
+                if limit and len(data) >= limit:
+                    break
     elif dataset_path.suffix == ".parquet":
         df = pd.read_parquet(dataset_path)
         if "prompt" in df.columns and "output" in df.columns:
@@ -96,6 +99,9 @@ def get_packed_sft_dataset(
             ]
         else:
             raise ValueError(f"Unknown columns in parquet: {df.columns}")
+
+        if limit:
+            data = data[:limit]
     else:
         raise ValueError(f"Unsupported file format: {dataset_path.suffix}")
 
@@ -275,22 +281,30 @@ def train(
     weight_decay: float = 0.01,
     warmup_steps: int = 100,
     save_steps: int = 500,
+    limit: Optional[int] = None,
 ):
     logging.basicConfig(level=logging.INFO)
     logger.info("Initializing SFT training...")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+
+    logger.info(f"Using device: {device}")
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    dataset = get_packed_sft_dataset(dataset_path, tokenizer, seq_length)
+    dataset = get_packed_sft_dataset(dataset_path, tokenizer, seq_length, limit=limit)
     dataloader = DataLoader(dataset, batch_size=micro_batch_size, shuffle=True)
 
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        torch_dtype=torch.bfloat16 if device.type != "cpu" else torch.float32,
         device_map=device,
     )
     model.train()

@@ -21,6 +21,8 @@ dependencies = [
     "wandb>=0.19.8",
     "xopen>=2.0.2",
     "huggingface-hub[cli]>=0.31.1",
+    "mlx>=0.21.0",
+    "mlx-lm>=0.21.0",
 ]
 
 [tool.setuptools.packages.find]
