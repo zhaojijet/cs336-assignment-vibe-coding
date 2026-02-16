@@ -1006,56 +1006,58 @@ def grade(model_answer: str, gt_answer: str, fast: bool = True):
 
 
 def r1_zero_reward_fn(response, ground_truth, fast=True):
+    """
+    Reward function for R1-preparatory models using <think> and <answer> tags.
+    """
     # We are strict about format to evaluate our models.
-    if "</think> <answer>" in response and "</answer>" in response:
+    # Use regex to be robust to whitespace (including newlines) between tags.
+    # Pattern: ... </think> [whitespace] <answer> [content] </answer>
+    import re
+
+    # We look for the closing think tag and the answer block.
+    # Note: The prompt ends with <think>, so the model output should eventually close it.
+    match = re.search(r"</think>\s*<answer>(.*?)</answer>", response, re.DOTALL)
+
+    if match:
+        # model_answer = match.group(1).strip()
         model_answer = response.split("<answer>")[-1].replace("</answer>", "")
         if "\\boxed" in model_answer:
             model_answer = extract_answer(model_answer)
             if model_answer is None:
-                return {
-                    "format_reward": 1.0,
-                    "answer_reward": 0.0,
-                    "reward": 0.0
-                }
-        if isinstance(ground_truth, float) or isinstance(ground_truth, int):
+                return {"format_reward": 1.0, "answer_reward": 0.0, "reward": 0.0}
+
+        if isinstance(ground_truth, (float, int)):
             ground_truth = str(ground_truth)
+
         if isinstance(ground_truth, str):
             is_correct = grade(model_answer, ground_truth, fast)
         elif isinstance(ground_truth, list):
-            is_correct = False
-            for gt in ground_truth:
-                is_correct |= grade(model_answer, gt, fast)
-        if is_correct:
-            return {
-                "format_reward": 1.0,
-                "answer_reward": 1.0,
-                "reward": 1.0
-            }
+            is_correct = any(grade(model_answer, gt, fast) for gt in ground_truth)
         else:
-            # Formatted but wrong answer; no format reward to avoid hacking.
-            return {
-                "format_reward": 1.0,
-                "answer_reward": 0.0,
-                "reward": 0.0
-            }
+            is_correct = False
+
+        if is_correct:
+            return {"format_reward": 1.0, "answer_reward": 1.0, "reward": 1.0}
+        else:
+            return {"format_reward": 1.0, "answer_reward": 0.0, "reward": 0.0}
     else:
-        # Unformatted.
-        return {
-            "format_reward": 0.0,
-            "answer_reward": 0.0,
-            "reward": 0.0
-        }
+        # Check if it just has <answer> tags but missed </think>
+        # (Common in short/naive generations)
+        match_answer_only = re.search(r"<answer>(.*?)</answer>", response, re.DOTALL)
+        if match_answer_only:
+            # Reward is 0 because formatting is incomplete (no </think>),
+            # but we could potentially give a partial reward if we wanted.
+            # However, R1 Zero strictly needs both.
+            pass
+
+        return {"format_reward": 0.0, "answer_reward": 0.0, "reward": 0.0}
 
 
 def question_only_reward_fn(response, ground_truth, fast=True):
     model_answer = extract_answer(response)
     if model_answer is None:
         # Cannot even parse anything.
-        return {
-            "format_reward": 0.0,
-            "answer_reward": 0.0,
-            "reward": 0.0
-        }
+        return {"format_reward": 0.0, "answer_reward": 0.0, "reward": 0.0}
     if isinstance(ground_truth, float) or isinstance(ground_truth, int):
         ground_truth = str(ground_truth)
     if isinstance(ground_truth, str):
@@ -1066,15 +1068,7 @@ def question_only_reward_fn(response, ground_truth, fast=True):
             is_correct |= grade(model_answer, gt, fast)
     if is_correct:
         # Correctness reward.
-        return {
-            "format_reward": 1.0,
-            "answer_reward": 1.0,
-            "reward": 1.0
-        }
+        return {"format_reward": 1.0, "answer_reward": 1.0, "reward": 1.0}
     else:
         # Formatted but wrong answer; no format reward to avoid hacking.
-        return {
-            "format_reward": 1.0,
-            "answer_reward": 0.0,
-            "reward": 0.0
-        }
+        return {"format_reward": 1.0, "answer_reward": 0.0, "reward": 0.0}
